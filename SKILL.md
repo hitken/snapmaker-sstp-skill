@@ -159,7 +159,10 @@ totalLines, estimatedTime, currentLine, progress, elapsedTime, remainingTime, mo
 8080 是纯 HTTP 无加密，token 明文在 machine.json，同网段任何主机可下发 G-code。
 部署在办公网时值得跟 IT 确认 VLAN 隔离。
 
-## 脚本模板
+## Luban token 读取路径
+`~/Library/Application Support/snapmaker-luban/machine.json` 里 token 在
+**`state.server.token`**（不是 `server.token`；`state.session.token` 是另一个 JWT，无效）。
+读错路径会报"缺少 token"。脚本两处都试。
 ```python
 import socket, json
 HOST, PORT, TOKEN = "172.16.38.160", 8080, "<token>"
