@@ -4,26 +4,37 @@
 
 固件里 `status` 与 `printStatus` 是两套独立标志，**可能不一致**：
 
-| 字段 | 取值 | 含义 |
+| 字段 | 取值 | 谁在用 |
 |---|---|---|
-| `status` | `IDLE` / `RUNNING` / `PAUSED` | 连接/任务主状态 |
-| `printStatus` | `Idle` / `Printing` / `Paused` / … | 打印任务子状态 |
+| `status` | `IDLE` / `RUNNING` / `PAUSED` | **桌面端 UI 主状态**（`status.toLowerCase()`） |
+| `printStatus` | `Idle` / `Printing` / `Paused` / … | 仅打印信息块，空闲时会被丢弃 |
 
-实测踩到的坑：在空闲时调用过一次 `pause_print` 之后，`printStatus` 永久卡在 `Paused`，
-而 `status` 仍是 `IDLE`、`progress` 是 0、目标温度是 0、喷嘴没加热。
-此时 `resume_print` / `stop_print` / `start_print` **全部返回 409**，无法复位，
-只能重启打印机清除。
+### 空闲时 `printStatus` 变成 `Paused` 是正常的，不是故障
+在空闲状态下调过一次 `pause_print` 后，固件 `/api/v1/status` 的 `printStatus`
+会变成 `Paused` 并**一直保持**，而 `status` 仍是 `IDLE`、`progress`/`currentLine`/
+`totalLines` 全是 0、目标温度 0。`resume_print` / `stop_print` / `start_print`
+此时都返回 409，无法复位。
 
-**结论：判断"是否真在打印"必须同时看 `progress`、`fileName` 和目标温度，
-不能只看单个布尔字段。** 脚本里的 `is_busy()` 就是这个逻辑：
+**但这不影响任何实际使用**——桌面端源码 `getGcodePrintingInfo` 有守卫：
 
-```python
-if s.get("status") in ("RUNNING", "PAUSED"): return True
-if (s.get("progress") or 0) > 0: return True
-if (s.get("nozzleTargetTemperature") or 0) > 0: return True
+```js
+if (!currentLine || !estimatedTime || !totalLines) return {};
 ```
 
+`currentLine`/`estimatedTime`/`totalLines` 任一为 0（空闲时必然如此），
+整个打印信息块直接返回空对象，`printStatus` 和 `fileName` 都被丢弃。
+UI 主状态用的是 `status.toLowerCase()`（`idle`），跟 `printStatus` 无关。
+
+**所以：桌面端显示正常就是正常，不需要重启打印机。**
+判断"是否真在打印"要看 `status` / `progress` / `currentLine` / 目标温度，
+`printStatus` 在空闲时是不可信字段。
+
 `remainingTime` 也是残留估算值，空闲时会显示几小时的荒谬数字，不要当真实剩余时间用。
+
+### fileName 残留同理
+`prepare_print` 会把 `fileName` 设成上传的文件名，即使从没启动过。
+守卫条件让它不出现在桌面端 UI 上，但 `/api/v1/status` 里能看到。
+属于测试痕迹，非故障。
 
 ## 探测端点时不要调有副作用的接口
 
@@ -34,6 +45,8 @@ if (s.get("nozzleTargetTemperature") or 0) > 0: return True
 
 `prepare_print` 会把 `fileName` 设成上传的文件名（实测 `reset_probe.gcode`），
 但不会真的开始打印。
+
+不过如上所述，这些残留字段在空闲时都不会影响桌面端 UI 或实际功能。
 
 ## 独占槽位
 

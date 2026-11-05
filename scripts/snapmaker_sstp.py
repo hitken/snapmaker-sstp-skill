@@ -253,9 +253,21 @@ def discover(timeout: float = 3.0, retries: int = 2,
 
 # ---------- 输出 ----------
 
+def has_print_job(s: dict) -> bool:
+    """固件是否真的挂着一个打印任务。
+
+    与桌面端 `getGcodePrintingInfo` 的守卫保持一致：
+    `if (!currentLine || !estimatedTime || !totalLines) return {}`
+    空闲时这三个字段都是 0，此时 printStatus / fileName 都不可信
+    （调过一次 pause_print 就会永久停在 "Paused"，但实际没有任何任务）。
+    """
+    return bool(s.get("currentLine")) and bool(s.get("estimatedTime")) \
+        and bool(s.get("totalLines"))
+
+
 def fmt_status(s: dict) -> str:
     lines = [
-        f"状态     : {s.get('status')} / {s.get('printStatus')}",
+        f"状态     : {s.get('status')}",
         f"坐标     : X={s.get('x')} Y={s.get('y')} Z={s.get('z')}  已归零={s.get('homed')}",
         f"喷嘴温度 : {s.get('nozzleTemperature')}°C / 目标 {s.get('nozzleTargetTemperature')}°C",
         f"热床温度 : {s.get('heatedBedTemperature')}°C / 目标 {s.get('heatedBedTargetTemperature')}°C",
@@ -263,8 +275,9 @@ def fmt_status(s: dict) -> str:
         f"耗材     : {'缺料!' if s.get('isFilamentOut') else '正常'}",
         f"打印头   : {s.get('toolHead')}",
     ]
-    if s.get("fileName"):
-        lines.append(f"文件     : {s['fileName']}  进度 {s.get('progress', 0) * 100:.1f}%")
+    if has_print_job(s):
+        lines.append(f"文件     : {s.get('fileName')}  进度 {s.get('progress', 0) * 100:.1f}%")
+        lines.append(f"任务状态 : {s.get('printStatus')}")
     return "\n".join(lines)
 
 
@@ -272,7 +285,7 @@ def is_busy(s: dict) -> bool:
     """判断是否真在打印。
 
     注意 status 与 printStatus 可能不一致（status=IDLE 但 printStatus=Paused），
-    所以同时看进度与目标温度。
+    所以同时看进度与目标温度，且**不**用 printStatus 判定。
     """
     if s.get("status") in ("RUNNING", "PAUSED"):
         return True

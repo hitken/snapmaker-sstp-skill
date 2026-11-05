@@ -88,11 +88,17 @@ python3 scripts/snapmaker_sstp.py --config printer.json status
 用错就是 404。表单字段名同理：`workSpeed` 不是 `value`，
 `nozzleTemp` 不是 `nozzleTemperature`。
 
-**2. `status` 和 `printStatus` 可能不一致**
+**2. 空闲时 `printStatus` 是噪声，不代表故障**
 
-在空闲时误调过一次 `pause_print`，固件的 `printStatus` 会**永久卡在 `Paused`**，
-而 `status` 仍是 `IDLE`。此时 resume/stop/start 全部 409，无法复位，只能重启打印机。
-判断"是否真在打印"要同时看 `progress` / `fileName` / 目标温度。
+在空闲时误调过一次 `pause_print`，固件的 `printStatus` 会**永久停在 `Paused`**，
+而 `status` 仍是 `IDLE`、`progress`/`currentLine`/`totalLines` 全是 0。
+
+这**不影响任何实际使用**：桌面端源码 `getGcodePrintingInfo` 有守卫
+`if (!currentLine || !estimatedTime || !totalLines) return {}`，
+空闲时整个打印信息块被丢弃，UI 主状态用的是 `status.toLowerCase()`。
+
+所以桌面端显示正常就是正常，**不需要重启打印机**。
+脚本的 `status` 输出也按同一守卫过滤，不会显示误导性的 `Paused`。
 
 **3. `/api/v1/connect` 是独占槽位**
 

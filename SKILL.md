@@ -148,12 +148,29 @@ totalLines, estimatedTime, currentLine, progress, elapsedTime, remainingTime, mo
 
 ## 探测端点时不要调有副作用的接口
 枚举/验证 API 时，只调**只读**端点（status / module_list / module_info / print_file）。
-`pause_print` / `stop_print` / `start_print` 即使在空闲时也会**改写固件状态**：
-调过 `pause_print` 后 `printStatus` 会卡在 `Paused`，而 `resume_print` / `stop_print` /
-`start_print` 在无任务时都返回 409 无法复位，需重启打印机才能清除。
+`pause_print` / `stop_print` / `start_print` 即使在空闲时也会**改写固件状态**。
 
-注意 `status` 与 `printStatus` 可能不一致（`status=IDLE` 但 `printStatus=Paused`），
-判断“是否真在打印”要看 `progress` / `fileName` / 温度目标，不要只看单个字段。
+### 空闲时的 `printStatus` 是噪声，不代表故障
+在空闲状态下调过一次 `pause_print` 后，固件 `/api/v1/status` 的 `printStatus` 会变成
+`Paused` 并**一直保持**，而 `status` 仍是 `IDLE`、`progress`/`currentLine`/`totalLines`
+全是 0、目标温度 0。看起来像"卡住了"，**其实没有任何影响**——
+
+原因在桌面端源码 `getGcodePrintingInfo` 的守卫：
+```js
+if (!currentLine || !estimatedTime || !totalLines) return {};
+```
+`currentLine`/`estimatedTime`/`totalLines` 任一为 0（空闲时必然如此），
+整个打印信息块直接返回空对象，`printStatus` 和 `fileName` 都被丢弃。
+UI 主状态用的是 `status.toLowerCase()`（即 `idle`），与 `printStatus` 无关。
+
+**结论：桌面端显示正常就是正常，不需要重启打印机。**
+`printStatus` 在空闲时只应作为"不可信字段"看待，判断是否真在打印要看
+`progress` / `currentLine` / 目标温度 / `status`。
+
+### fileName 残留同理
+`prepare_print` 会把 `fileName` 设成上传的文件名，即使从没启动过。
+守卫条件同样让它不出现在桌面端 UI 上，但 `/api/v1/status` 里能看到。
+属于测试痕迹，非故障。
 
 ## 安全
 8080 是纯 HTTP 无加密，token 明文在 machine.json，同网段任何主机可下发 G-code。
